@@ -1,0 +1,51 @@
+Feature: Gestión de Salas
+  Como administrador del sistema
+  Quiero gestionar las salas disponibles
+  Para poder asignarlas correctamente a las actividades
+
+  Antecedentes:
+    Dado que tengo una conexión a la base de datos
+    Y la tabla de salas está limpia
+
+  Escenario: Obtener lista de salas exitosamente
+    Dado que existen 5 salas registradas
+    Cuando realizo una solicitud GET a "/api/v1/salas"
+    Entonces recibo un código de estado 200
+    Y la respuesta contiene una lista de salas
+    Y el total de salas es 5
+    Y el skip es 0
+    Y el limit es 10
+
+  Escenario: Obtener una sala por ID existente
+    Dado que existe una sala con ID 1
+    Cuando realizo una solicitud GET a "/api/v1/salas/1"
+    Entonces recibo un código de estado 200
+    Y la respuesta contiene los datos completos de la sala
+
+  Escenario: Crear una sala válida exitosamente
+    Cuando realizo una solicitud POST a "/api/v1/salas" con datos válidos
+    Entonces recibo un código de estado 201
+    Y la respuesta contiene el ID generado
+
+  Escenario: Crear una sala con nombre duplicado
+    Dado que existe una sala con nombre "Aula A-101"
+    Cuando realizo una solicitud POST a "/api/v1/salas" con nombre "Aula A-101"
+    Entonces recibo un código de estado 409
+    Y el mensaje de error es "Una sala con el nombre 'Aula A-101' ya existe"
+
+  Escenario: Validar parámetros de paginación inválidos
+    Cuando realizo una solicitud GET a "/api/v1/salas?limit=150"
+    Entonces recibo un código de estado 400
+    Y el mensaje de error indica que limit debe estar entre 1 y 100
+
+  Escenario: Actualizar una sala existente completamente
+    Dado que existe una sala con ID 1
+    Cuando realizo una solicitud PUT a "/api/v1/salas/1" con datos válidos
+    Entonces recibo un código de estado 200
+    Y la sala con ID 1 tiene los nuevos valores
+
+  Escenario: Eliminar una sala existente
+    Dado que existe una sala con ID 5
+    Cuando realizo una solicitud DELETE a "/api/v1/salas/5"
+    Entonces recibo un código de estado 204
+    Y la sala es eliminada de la base de datos
