@@ -1,88 +1,158 @@
+from __future__ import annotations
+
 from typing import Optional
 
-from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.repositories.sala_repository import SalaRepository
+from app.models.sala import Sala
 from app.schemas.sala_schema import SalaCreate, SalaUpdate
 
 
-class SalaService:
-    def __init__(self, db: Session):
-        self.repository = SalaRepository(db)
+class BaseRepository:
+    """Define la dependencia compartida hacia la sesión de base de datos."""
 
-    def obtener_todas_salas(
+    def __init__(self, db: Session):
+        self.db = db
+
+
+class SalaRepository(BaseRepository):
+    """Encapsula las operaciones de persistencia para entidades Sala."""
+
+    def __init__(self, db: Session):
+        super().__init__(db)
+
+    def obtener_todos(self, skip: int = 0, limit: int = 10) -> list[Sala]:
+        """Obtiene una página de salas ordenadas por id.
+
+        Args:
+            skip: Número de registros a omitir.
+            limit: Número máximo de registros a devolver.
+
+        Returns:
+            Lista de salas paginadas.
+        """
+        return self.db.query(Sala).offset(skip).limit(limit).all()
+
+    def obtener_por_id(self, sala_id: int) -> Optional[Sala]:
+        """Busca una sala por su identificador.
+
+        Args:
+            sala_id: Identificador único de la sala.
+
+        Returns:
+            La sala encontrada o None si no existe.
+        """
+        return self.db.query(Sala).filter(Sala.id == sala_id).first()
+
+    def obtener_por_nombre(self, nombre: str) -> Optional[Sala]:
+        """Busca una sala por su nombre exacto.
+
+        Args:
+            nombre: Nombre completo de la sala.
+
+        Returns:
+            La sala encontrada o None si no existe.
+        """
+        return self.db.query(Sala).filter(Sala.nombre == nombre).first()
+
+    def filtrar(
         self,
         skip: int = 0,
         limit: int = 10,
         tipo_sala: Optional[str] = None,
         estado: Optional[str] = None,
-    ) -> dict:
-        if skip < 0:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="skip no puede ser negativo")
-        if limit <= 0 or limit > 100:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="limit debe estar entre 1 y 100",
-            )
+    ) -> list[Sala]:
+        """Aplica filtros de búsqueda y paginación sobre salas.
 
-        salas = self.repository.filtrar(skip=skip, limit=limit, tipo_sala=tipo_sala, estado=estado)
-        total = self.repository.contar_total()
+        Args:
+            skip: Número de registros a omitir.
+            limit: Número máximo de registros a devolver.
+            tipo_sala: Filtro por tipo de sala, si aplica.
+            estado: Filtro por estado de sala, si aplica.
 
-        return {
-            "total": total,
-            "skip": skip,
-            "limit": limit,
-            "salas": salas,
-        }
+        Returns:
+            Lista de salas que cumplen los filtros.
+        """
+        query = self._crear_consulta_filtrada(tipo_sala=tipo_sala, estado=estado)
+        return query.offset(skip).limit(limit).all()
 
-    def obtener_sala_por_id(self, sala_id: int):
-        sala = self.repository.obtener_por_id(sala_id)
-        if not sala:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Sala con ID {sala_id} no encontrada",
-            )
-        return sala
+    def _crear_consulta_filtrada(
+        self,
+        tipo_sala: Optional[str] = None,
+        estado: Optional[str] = None,
+    ):
+        """Construye la query base aplicando los filtros opcionales.
 
-    def crear_sala(self, sala_data: SalaCreate):
-        if self.repository.obtener_por_nombre(sala_data.nombre):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Una sala con el nombre '{sala_data.nombre}' ya existe",
-            )
+        Args:
+            tipo_sala: Filtro por tipo de sala.
+            estado: Filtro por estado.
 
-        try:
-            return self.repository.crear(sala_data)
-        except Exception as exc:  # pragma: no cover
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        Returns:
+            Query de SQLAlchemy con filtros aplicados.
+        """
+        query = self.db.query(Sala)
 
-    def actualizar_sala(self, sala_id: int, sala_data: SalaUpdate):
-        sala_existente = self.repository.obtener_por_id(sala_id)
+        if tipo_sala:
+            query = query.filter(Sala.tipo_sala == tipo_sala)
+        if estado:
+            query = query.filter(Sala.estado == estado)
+
+        return query
+
+    def contar_total(self) -> int:
+        """Devuelve la cantidad total de salas registradas."""
+        return self.db.query(Sala).count()
+
+    def crear(self, sala_data: SalaCreate) -> Sala:
+        """Crea una nueva sala a partir de datos validados.
+
+        Args:
+            sala_data: Datos de creación de la sala.
+
+        Returns:
+            La sala persistida con su ID generado.
+        """
+        nueva_sala = Sala(**sala_data.model_dump())
+        self.db.add(nueva_sala)
+        self.db.commit()
+        self.db.refresh(nueva_sala)
+        return nueva_sala
+
+    def actualizar(self, sala_id: int, sala_data: SalaUpdate) -> Optional[Sala]:
+        """Actualiza una sala existente con los datos recibidos.
+
+        Args:
+            sala_id: Identificador de la sala a actualizar.
+            sala_data: Datos parciales o completos a aplicar.
+
+        Returns:
+            La sala actualizada o None si no existe.
+        """
+        sala_existente = self.obtener_por_id(sala_id)
         if not sala_existente:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Sala con ID {sala_id} no encontrada",
-            )
+            return None
 
-        if sala_data.nombre and sala_data.nombre != sala_existente.nombre:
-            nombre_existente = self.repository.obtener_por_nombre(sala_data.nombre)
-            if nombre_existente:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=f"Una sala con el nombre '{sala_data.nombre}' ya existe",
-                )
+        datos_actualizacion = sala_data.model_dump(exclude_unset=True)
+        for nombre_campo, valor in datos_actualizacion.items():
+            setattr(sala_existente, nombre_campo, valor)
 
-        try:
-            return self.repository.actualizar(sala_id, sala_data)
-        except Exception as exc:  # pragma: no cover
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        self.db.commit()
+        self.db.refresh(sala_existente)
+        return sala_existente
 
-    def eliminar_sala(self, sala_id: int) -> bool:
-        eliminada = self.repository.eliminar(sala_id)
-        if not eliminada:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Sala con ID {sala_id} no encontrada",
-            )
+    def eliminar(self, sala_id: int) -> bool:
+        """Elimina una sala si existe.
+
+        Args:
+            sala_id: Identificador de la sala a eliminar.
+
+        Returns:
+            True si la eliminación tuvo éxito; False si la sala no existe.
+        """
+        sala_existente = self.obtener_por_id(sala_id)
+        if not sala_existente:
+            return False
+
+        self.db.delete(sala_existente)
+        self.db.commit()
         return True

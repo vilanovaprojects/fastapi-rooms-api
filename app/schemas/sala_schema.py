@@ -1,81 +1,111 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Optional
-from datetime import datetime
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.orm import Session
+
+from app.config import get_db
+from app.schemas.sala_schema import SalaCreate, SalaResponse, SalaUpdate
+from app.services.sala_service import SalaService
+
+router = APIRouter(prefix="/api/v1/salas", tags=["salas"])
 
 
-VALID_TIPOS_SALA = ["Aula", "Laboratorio", "Auditorio", "Oficina"]
-VALID_ESTADOS = ["activa", "mantenimiento", "inhabitable"]
+def get_sala_service(db: Session = Depends(get_db)) -> SalaService:
+    """Crea la instancia del servicio de salas para una petición."""
+    return SalaService(db)
 
 
-class SalaBase(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+@router.get("", response_model=dict)
+def obtener_salas(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(10, ge=1, le=100),
+    tipo_sala: str | None = Query(default=None),
+    estado: str | None = Query(default=None),
+    service: SalaService = Depends(get_sala_service),
+) -> dict:
+    """Obtiene todas las salas con paginación y filtros opcionales.
 
-    nombre: str = Field(..., min_length=3, max_length=100)
-    piso: int = Field(..., ge=1, le=10)
-    capacidad: int = Field(..., ge=1, le=500)
-    tipo_sala: str = Field(...)
-    numero_ventanas: Optional[int] = Field(default=0, ge=0)
-    tiene_proyector: bool = False
-    tiene_aire_acondicionado: bool = False
-    estado: str = Field(default="activa")
-    descripcion: Optional[str] = Field(default=None, max_length=500)
+    Args:
+        skip: Número de registros a omitir.
+        limit: Cantidad máxima de registros a devolver.
+        tipo_sala: Filtro opcional por tipo de sala.
+        estado: Filtro opcional por estado.
+        service: Servicio de negocio inyectado.
 
-    @field_validator("tipo_sala")
-    @classmethod
-    def validar_tipo_sala(cls, value: str) -> str:
-        value = value.strip()
-        if value not in VALID_TIPOS_SALA:
-            raise ValueError(f"tipo_sala debe ser uno de: {', '.join(VALID_TIPOS_SALA)}")
-        return value
-
-    @field_validator("estado")
-    @classmethod
-    def validar_estado(cls, value: str) -> str:
-        value = value.strip().lower()
-        if value not in VALID_ESTADOS:
-            raise ValueError(f"estado debe ser uno de: {', '.join(VALID_ESTADOS)}")
-        return value
+    Returns:
+        Dicionario con total, paginación y lista de salas.
+    """
+    return service.obtener_todas_salas(
+        skip=skip,
+        limit=limit,
+        tipo_sala=tipo_sala,
+        estado=estado,
+    )
 
 
-class SalaCreate(SalaBase):
-    pass
+@router.get("/{sala_id}", response_model=SalaResponse)
+def obtener_sala(
+    sala_id: int,
+    service: SalaService = Depends(get_sala_service),
+) -> SalaResponse:
+    """Obtiene una sala por su identificador.
+
+    Args:
+        sala_id: ID de la sala a consultar.
+        service: Servicio de negocio inyectado.
+
+    Returns:
+        Datos completos de la sala.
+    """
+    return service.obtener_sala_por_id(sala_id)
 
 
-class SalaUpdate(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+@router.post("", response_model=SalaResponse, status_code=status.HTTP_201_CREATED)
+def crear_sala(
+    sala: SalaCreate,
+    service: SalaService = Depends(get_sala_service),
+) -> SalaResponse:
+    """Crea una nueva sala en el sistema.
 
-    nombre: Optional[str] = Field(default=None, min_length=3, max_length=100)
-    piso: Optional[int] = Field(default=None, ge=1, le=10)
-    capacidad: Optional[int] = Field(default=None, ge=1, le=500)
-    tipo_sala: Optional[str] = None
-    numero_ventanas: Optional[int] = Field(default=None, ge=0)
-    tiene_proyector: Optional[bool] = None
-    tiene_aire_acondicionado: Optional[bool] = None
-    estado: Optional[str] = None
-    descripcion: Optional[str] = Field(default=None, max_length=500)
+    Args:
+        sala: Datos de la nueva sala.
+        service: Servicio de negocio inyectado.
 
-    @field_validator("tipo_sala")
-    @classmethod
-    def validar_tipo_sala(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return value
-        value = value.strip()
-        if value not in VALID_TIPOS_SALA:
-            raise ValueError(f"tipo_sala debe ser uno de: {', '.join(VALID_TIPOS_SALA)}")
-        return value
-
-    @field_validator("estado")
-    @classmethod
-    def validar_estado(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return value
-        value = value.strip().lower()
-        if value not in VALID_ESTADOS:
-            raise ValueError(f"estado debe ser uno de: {', '.join(VALID_ESTADOS)}")
-        return value
+    Returns:
+        La sala creada.
+    """
+    return service.crear_sala(sala)
 
 
-class SalaResponse(SalaBase):
-    id: int
-    fecha_creacion: datetime
-    fecha_actualizacion: datetime
+@router.put("/{sala_id}", response_model=SalaResponse)
+def actualizar_sala(
+    sala_id: int,
+    sala_data: SalaUpdate,
+    service: SalaService = Depends(get_sala_service),
+) -> SalaResponse:
+    """Actualiza una sala existente.
+
+    Args:
+        sala_id: ID de la sala a actualizar.
+        sala_data: Datos nuevos para la sala.
+        service: Servicio de negocio inyectado.
+
+    Returns:
+        La sala actualizada.
+    """
+    return service.actualizar_sala(sala_id, sala_data)
+
+
+@router.delete("/{sala_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_sala(
+    sala_id: int,
+    service: SalaService = Depends(get_sala_service),
+) -> None:
+    """Elimina una sala por su identificador.
+
+    Args:
+        sala_id: ID de la sala a eliminar.
+        service: Servicio de negocio inyectado.
+    """
+    service.eliminar_sala(sala_id)
+    return None

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from datetime import datetime
 
 from sqlalchemy import Boolean, Column, DateTime, Integer, String
@@ -7,6 +9,12 @@ Base = declarative_base()
 
 
 class Sala(Base):
+    """Representa una sala del entorno educativo.
+
+    Esta entidad almacena la información básica de una sala, su estado,
+    disponibilidad y metadatos de auditoría.
+    """
+
     __tablename__ = "salas"
 
     id = Column(Integer, primary_key=True, index=True)
